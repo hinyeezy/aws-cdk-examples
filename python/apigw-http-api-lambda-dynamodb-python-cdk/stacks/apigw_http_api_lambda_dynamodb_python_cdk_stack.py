@@ -164,6 +164,31 @@ class ApigwHttpApiLambdaDynamodbPythonCdkStack(Stack):
             )
         )
 
+        # Create usage plan with per-client throttling (REL05-BP02)
+        usage_plan = api.add_usage_plan(
+            "DefaultUsagePlan",
+            name="default-usage-plan",
+            description="Default usage plan with throttling limits",
+            throttle=apigw_.ThrottleSettings(
+                rate_limit=50,    # 50 requests per second per API key
+                burst_limit=100   # 100 burst capacity per API key
+            ),
+            quota=apigw_.QuotaSettings(
+                limit=10000,      # 10,000 requests per day
+                period=apigw_.Period.DAY
+            )
+        )
+
+        # Create API key for throttling control
+        api_key = api.add_api_key(
+            "DefaultApiKey",
+            api_key_name="default-api-key",
+            description="Default API key for throttling"
+        )
+
+        # Associate API key with usage plan
+        usage_plan.add_api_key(api_key)
+
         # CloudWatch Alarms for monitoring
         lambda_error_alarm = cloudwatch.Alarm(
             self,
