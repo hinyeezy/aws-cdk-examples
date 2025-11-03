@@ -10,6 +10,9 @@ from aws_cdk import (
     aws_ec2 as ec2,
     aws_iam as iam,
     aws_cloudwatch as cloudwatch,
+    aws_cloudtrail as cloudtrail,
+    aws_s3 as s3,
+    aws_logs as logs,
     Duration,
 )
 from constructs import Construct
@@ -20,6 +23,42 @@ TABLE_NAME = "demo_table"
 class ApigwHttpApiLambdaDynamodbPythonCdkStack(Stack):
     def __init__(self, scope: Construct, construct_id: str, **kwargs) -> None:
         super().__init__(scope, construct_id, **kwargs)
+
+        # CloudTrail S3 bucket for security audit logs
+        cloudtrail_bucket = s3.Bucket(
+            self,
+            "CloudTrailBucket",
+            encryption=s3.BucketEncryption.S3_MANAGED,
+            block_public_access=s3.BlockPublicAccess.BLOCK_ALL,
+            versioning=True,
+            lifecycle_rules=[
+                s3.LifecycleRule(
+                    id="CloudTrailLogRetention",
+                    enabled=True,
+                    transitions=[
+                        s3.Transition(
+                            storage_class=s3.StorageClass.INFREQUENT_ACCESS,
+                            transition_after=Duration.days(30)
+                        ),
+                        s3.Transition(
+                            storage_class=s3.StorageClass.GLACIER,
+                            transition_after=Duration.days(90)
+                        )
+                    ]
+                )
+            ]
+        )
+
+        # CloudTrail for API call logging
+        trail = cloudtrail.Trail(
+            self,
+            "SecurityAuditTrail",
+            bucket=cloudtrail_bucket,
+            include_global_service_events=True,
+            is_multi_region_trail=True,
+            enable_file_validation=True,
+            trail_name="security-audit-trail"
+        )
 
         # VPC
         vpc = ec2.Vpc(
@@ -32,6 +71,22 @@ class ApigwHttpApiLambdaDynamodbPythonCdkStack(Stack):
                     cidr_mask=24
                 )
             ],
+        )
+
+        # CloudWatch Log Group for VPC Flow Logs
+        vpc_flow_log_group = logs.LogGroup(
+            self,
+            "VpcFlowLogGroup",
+            retention=logs.RetentionDays.ONE_MONTH,
+            log_group_name="/aws/vpc/flowlogs"
+        )
+
+        # Enable VPC Flow Logs
+        vpc_flow_log = ec2.FlowLog(
+            self,
+            "VpcFlowLog",
+            resource_type=ec2.FlowLogResourceType.from_vpc(vpc),
+            destination=ec2.FlowLogDestination.to_cloud_watch_logs(vpc_flow_log_group)
         )
         
         # Create VPC endpoint
@@ -59,13 +114,23 @@ class ApigwHttpApiLambdaDynamodbPythonCdkStack(Stack):
             )
         )
 
-        # Create DynamoDb Table
+        # Create DynamoDb Table with audit logging
         demo_table = dynamodb_.Table(
             self,
             TABLE_NAME,
             partition_key=dynamodb_.Attribute(
                 name="id", type=dynamodb_.AttributeType.STRING
             ),
+            point_in_time_recovery=True,  # Enable point-in-time recovery
+            stream=dynamodb_.StreamViewType.NEW_AND_OLD_IMAGES  # Enable DynamoDB Streams for audit
+        )
+
+        # Add DynamoDB data events to CloudTrail
+        trail.add_event_selector(
+            read_write_type=cloudtrail.ReadWriteType.ALL,
+            include_management_events=False,
+            data_resource_type=cloudtrail.DataResourceType.DYNAMO_DB_TABLE,
+            data_resource_values=[demo_table.table_arn]
         )
 
         # Create the Lambda function to receive the request
