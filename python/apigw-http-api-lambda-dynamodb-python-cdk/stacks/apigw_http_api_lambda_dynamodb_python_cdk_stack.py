@@ -154,13 +154,15 @@ class ApigwHttpApiLambdaDynamodbPythonCdkStack(Stack):
         demo_table.grant_write_data(api_hanlder)
         api_hanlder.add_environment("TABLE_NAME", demo_table.table_name)
 
-        # Create API Gateway with X-Ray tracing enabled
+        # Create API Gateway with X-Ray tracing and throttling enabled (REL05-BP02)
         api = apigw_.LambdaRestApi(
             self,
             "Endpoint",
             handler=api_hanlder,
             deploy_options=apigw_.StageOptions(
-                tracing_enabled=True  # Enable X-Ray tracing
+                tracing_enabled=True,  # Enable X-Ray tracing
+                throttling_rate_limit=100,    # 100 requests per second
+                throttling_burst_limit=200    # 200 burst capacity
             )
         )
 
