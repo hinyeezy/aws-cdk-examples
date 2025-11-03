@@ -133,7 +133,7 @@ class ApigwHttpApiLambdaDynamodbPythonCdkStack(Stack):
             data_resource_values=[demo_table.table_arn]
         )
 
-        # Create the Lambda function to receive the request
+        # Create the Lambda function with reserved concurrency (REL05-BP02)
         api_hanlder = lambda_.Function(
             self,
             "ApiHandler",
@@ -148,6 +148,7 @@ class ApigwHttpApiLambdaDynamodbPythonCdkStack(Stack):
             memory_size=1024,
             timeout=Duration.minutes(5),
             tracing=lambda_.Tracing.ACTIVE,  # Enable X-Ray tracing
+            reserved_concurrent_executions=50  # Prevent account concurrency exhaustion
         )
 
         # grant permission to lambda to write to demo table
